@@ -267,6 +267,11 @@ func (d *SqliteDriver) ListBranches(ctx context.Context) ([]driver.BranchInfo, e
 	return branches, nil
 }
 
+// Close releases any held resources for the SQLite driver (no-op for file-based SQLite)
+func (d *SqliteDriver) Close() error {
+	return nil
+}
+
 // formatDBPath converts a branch name into the corresponding SQLite database file path
 func (d *SqliteDriver) formatDBPath(branch string) string {
 	sanitized := git.SanitizeBranchName(branch)
