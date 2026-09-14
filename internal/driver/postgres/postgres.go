@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"errors"
+	"github.com/lib/pq"
+	"github.com/branchbase/branchbase/internal/git"
 
 	"github.com/branchbase/branchbase/internal/driver"
 )
@@ -106,7 +108,7 @@ func New(cfg Config) (*PostgresDriver, error) {
 		cfg.SSLMode = "disable"
 	}
 
-	db, err := sql.Open("pgx", cfg.DSN())
+	db, err := sql.Open("postgres", cfg.DSN())
 	if err != nil {
 		return nil, fmt.Errorf("failed to open postgres connection: %w", err)
 	}
@@ -186,6 +188,11 @@ func (d *PostgresDriver) CreateBranch(ctx context.Context, sourceBranch, targetB
 	createQuery := fmt.Sprintf("CREATE DATABASE %q TEMPLATE %q;", targetDB, sourceDB)
 	_, err := d.db.ExecContext(ctx, createQuery)
 	if err != nil {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "42P04" {
+			// SQLSTATE 42P04 = duplicate_database, treat as idempotent success
+			return nil
+		}
 		return fmt.Errorf("failed to create branch database %q from %q: %w", targetDB, sourceDB, err)
 	}
 
@@ -274,9 +281,9 @@ func (d *PostgresDriver) Close() error {
 }
 
 func (d *PostgresDriver) formatDBName(branch string) string {
-	branch = strings.TrimSpace(branch)
-	if branch == "" || branch == "main" || branch == "master" {
+	sanitized := git.SanitizeBranchName(branch)
+	if sanitized == "" || sanitized == "main" || sanitized == "master" || sanitized == "default" {
 		return d.cfg.BaseDatabase
 	}
-	return fmt.Sprintf("%s_%s", d.cfg.BaseDatabase, branch)
+	return fmt.Sprintf("%s_%s", d.cfg.BaseDatabase, sanitized)
 }
